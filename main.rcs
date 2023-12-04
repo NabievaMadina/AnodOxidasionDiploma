@@ -39,71 +39,116 @@ program ALoxidasion {
     // Процесс проверки состояния установки и входных сигналов
     process update{
         
-        bool launch_power   = start_launch_thyristor[1];
-        bool launch_C1      = start_support_thyristor_C1[1];
-        bool launch_C2      = start_support_thyristor_C2[1];
-        bool stop_work      = work_stop_signal[1];
-
-        bool signal_to_forward_thyr = open_forward_thyristor[1] shared;   
+        // Вход выход
+        //bool stop_work      = work_stop_signal[1] shared;
         //bool signal_to_reverse_thyr = open_reverse_thyristor[1] shared;   
-        bool open_C1                = open_C1_thyristor[1] shared;        
-        bool open_C2                = open_C2_thyristor[1] shared;        
 
-        state check_work_state looped{
+        state start_work_process looped{
             
             // Запуск рабочих процессов
-            if (launch_power){
-                start process start_main_power;
-            }
+            start process main_power_contorl;
+            start process bath_control_C1;
+            start process bath_control_C2;
             
-            if (launch_C1){
-                start process start_C1;
-            }
-
-            if (launch_C2){
-                start process start_C2;
-            }
         }
     }
     
     // Включение пускового тиристора
-    process start_main_power{
+    process main_power_contorl{
 
-        shared signal_to_forward_thyr from process update;
+        // Вход выход
+        bool launch_power           = start_launch_thyristor[1];
+        bool signal_to_forward_thyr = open_forward_thyristor[1];
         
-        state start_work_process{
-            
-            current_work_state = work_WORK; // Обновим состояние системы
-            set next state;
+        state check_state{
+            // Если сигнал подачи пускового напряжения присутствует
+            if(launch_power){
+                current_work_state = work_WORK; // Обновим состояние системы
+                set state start_work_process;
+            }
+            else{
+                current_work_state = work_STOP;
+                set state stop_work_process;
+            }
         }
 
-        state work_process_in_progress looped{  // Подача сигнала на управляющий вывод тиристора
+        // Подача сигнала на управляющий вывод тиристора
+        state start_work_process{  
             // TODO добавить режим переключения тиристоров (?)
             signal_to_forward_thyr = true;  // Включение пускового тиристора
-            
+            set state check_state;          // Возвращаемся для отследжвания сигнала управления
+        }
+
+        state stop_work_process{
+            signal_to_forward_thyr = false; // Отключение питания управляющего контакта тиристора
+            set state check_state;          // Возвращаемся для отследжвания сигнала управления
         }
     }
 
     // Включение тиристора для ванны С1
-    process start_C1{
+    process bath_control_C1{
 
-        shared open_C1 from process update;
+        // Вход выход
+        bool launch_C1  = start_support_thyristor_C1[1];
+        bool open_C1    = open_C1_thyristor[1];   
 
+        // Проверяем сигнал на входе
+        state check_state{
+            if (launch_C1){
+                set state start_C1_work;
+            }
+            else{
+                set state stop_C1_work;
+            }
+        }
+        
+        // Подаем сигнал на управляющий контакт тиристра ванны С1
         state start_C1_work looped{
 
             open_C1 = true;
+            set state check_state; // Возвращаемся в состояния отслеживания сигналов
+            
+        }
+        
+        // Убирам сигнал с управляющего контакта тиристра ванны С1
+        state stop_C1_work looped{
+
+            open_C1 = false;
+            set state check_state;
             
         }
     }
 
     // Включение тиристора для ванны С2
-    process start_C2{
+    process bath_control_C2{
 
-        shared open_C2 from process update;
+        // Вход выход
+        bool launch_C2  = start_support_thyristor_C2[1];
+        bool open_C2    = open_C2_thyristor[1];   
 
+        // Проверяем сигнал на входе
+        state check_state{
+            if (launch_C2){
+                set state start_C2_work;
+            }
+            else{
+                set state stop_C2_work;
+            }
+        }
+        
+        // Подаем сигнал на управляющий контакт тиристра ванны С2
         state start_C2_work looped{
 
             open_C2 = true;
+            set state check_state; // Возвращаемся в состояния отслеживания сигналов
+            
+        }
+        
+        // Убирам сигнал с управляющего контакта тиристра ванны С2
+        state stop_C2_work looped{
+
+            open_C2 = false;
+            set state check_state;
             
         }
     }
