@@ -1,0 +1,110 @@
+program ALoxidasion {
+
+    /* Программа управления пусковыми тиристорами
+    * для установки оксидирования алюминия
+    *
+    * ДАТА СОЗДАНИЯ: 02.12.2023
+    * АВТОР: Набиева Мадина Абдувалиевна
+    */
+	
+    // Время срабатывания программы
+    clock 0t50ms;
+    // TODO Добавить проверку через внутреннее время процессора
+
+    // Внутренние состояния системы
+    // Набор состояний в которых может находиться установка
+    
+    const uint32 work_STOP  = 0;
+    const uint32 work_WORK  = 1;
+    const uint32 work_ERROR = 2;
+
+    // Переменная для хранения состояния системы в данный момент (по умолчанию ОСТАНОВ)
+    uint32 current_work_state;
+
+    // Задание выходных\входных адресов для контроллера
+    // <вход\выход> <имя> <адрес1> <адрес2> <разрядность бит>;
+    output open_forward_thyristor   0x00 0xA0001 8; // Сигнал на открытие тиристора прямого тока
+    output open_reverse_thyristor   0x00 0xA0002 8; // Сигнал на открытие тиристора обратного тока
+    output open_C1_thyristor        0x00 0xA0003 8; // Сигнал на открытие тиристора ванны С1
+    output open_C2_thyristor        0x00 0xA0004 8; // Сигнал на открытие тиристора ванны С2
+
+
+    // Входные сигналы
+    input start_launch_thyristor        0x00 0xB0001 8; // Сигнал для пускового тиристора
+    input start_support_thyristor_C1    0x00 0xB0002 8; // Сигнал для тиристора ванны С1
+    input start_support_thyristor_C2    0x00 0xB0003 8; // Сигнал для тиристора ванны С2
+	input work_stop_signal              0x00 0xB0004 8; // Сигнал для завершения работы  
+    // Входняе данные по температуре тиристоров?
+
+    // Процесс проверки состояния установки и входных сигналов
+    process update{
+        
+        bool launch_power   = start_launch_thyristor[1];
+        bool launch_C1      = start_support_thyristor_C1[1];
+        bool launch_C2      = start_support_thyristor_C2[1];
+        bool stop_work      = work_stop_signal[1];
+
+        bool signal_to_forward_thyr = open_forward_thyristor[1] shared;   
+        //bool signal_to_reverse_thyr = open_reverse_thyristor[1] shared;   
+        bool open_C1                = open_C1_thyristor[1] shared;        
+        bool open_C2                = open_C2_thyristor[1] shared;        
+
+        state check_work_state looped{
+            
+            // Запуск рабочих процессов
+            if (launch_power){
+                start process start_main_power;
+            }
+            
+            if (launch_C1){
+                start process start_C1;
+            }
+
+            if (launch_C2){
+                start process start_C2;
+            }
+        }
+    }
+    
+    // Включение пускового тиристора
+    process start_main_power{
+
+        shared signal_to_forward_thyr from process update;
+        
+        state start_work_process{
+            
+            current_work_state = work_WORK; // Обновим состояние системы
+            set next state;
+        }
+
+        state work_process_in_progress looped{  // Подача сигнала на управляющий вывод тиристора
+            // TODO добавить режим переключения тиристоров (?)
+            signal_to_forward_thyr = true;  // Включение пускового тиристора
+            
+        }
+    }
+
+    // Включение тиристора для ванны С1
+    process start_C1{
+
+        shared open_C1 from process update;
+
+        state start_C1_work looped{
+
+            open_C1 = true;
+            
+        }
+    }
+
+    // Включение тиристора для ванны С2
+    process start_C2{
+
+        shared open_C2 from process update;
+
+        state start_C2_work looped{
+
+            open_C2 = true;
+            
+        }
+    }
+}
