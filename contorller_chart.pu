@@ -1,0 +1,62 @@
+@startuml thyristor_controller
+hide empty description
+
+Init : Тиристоры закрыты
+Init : Переход в рабочий\nрежим программы
+Init --> GetCMD : Запуск\nпроцесса
+
+state "CAN bus" as CANbus
+CANbus --> GetCMD : Внешние\nсигналы
+
+state GetCMD {
+    state c <<choice>>
+    GetCMD : Получение команды CMD    
+    c --> pTr1 <<exitPoint>> : SEND_TR1_T
+    c --> pTr2 <<exitPoint>> : SEND_TR2_T
+    c --> pTr3 <<exitPoint>> : SEND_TR3_T
+    c --> pTr4 <<exitPoint>> : SEND_TR4_T
+    c --> pOpening <<exitPoint>> : START_OPENING 
+}
+
+pTr1 --> StartProcessTr1
+pTr2 --> StartProcessTr2
+pTr3 --> StartProcessTr3
+pTr4 --> StartProcessTr4
+pOpening --> StartOpeningProcess
+
+state StartOpeningProcess {
+     begin --> pTr12Control <<exitPoint>> : START_Tr12Control
+     culcCurDelay : Расчет задержки
+}
+
+state pTr12Control {
+     
+     state CheckRE {
+        CheckRE : Если сигнал RE:
+        CheckRE : Выключить Tr1, Tr2
+     }
+
+     CheckRE -left-> PauseRE
+
+     state PauseRE {
+        PauseRE : После задержки tCurDelay
+        PauseRE : Включить Tr1
+     }
+
+     PauseRE -left-> CheckFE
+
+     state CheckFE {
+        CheckFE : Если сигнал FE:
+        CheckFE : Выключить Tr1, Tr2
+     }
+
+     CheckFE -left-> PauseFE
+
+     state PauseFE {
+        PauseFE : После задержки tCurDelay
+        PauseFE : Включить Tr2
+     }
+     
+}
+
+@enduml
