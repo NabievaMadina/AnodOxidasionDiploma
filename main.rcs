@@ -1,155 +1,169 @@
 program ALoxidasion {
 
-    /* Программа управления пусковыми тиристорами
-    * для установки оксидирования алюминия
+    /* Программа управления процессом оксидирования
     *
     * ДАТА СОЗДАНИЯ: 02.12.2023
     * АВТОР: Набиева Мадина Абдувалиевна
     */
 	
-    // Время срабатывания программы
-    clock 0t50ms;
-    // TODO Добавить проверку через внутреннее время процессора
+    clock 0t100ms;
+    
+    const bool ON = true;
+    const bool OFF = false;
+    
+    const int8 A0 = 0;
+    const int8 A1 = 1;
 
+    enum CAN_CMD  {
+// === запрос текущих параметров (CV)        
+        SEND_TR1_T = (int32)1, // запрос температуры Tr1
+        SEND_TR2_T,
+        SEND_TR3_T,
+        SEND_TR4_T,
+// === команды
+        START_OPENING,        
+// === технологические параметры (ТП)        
+        TP_OPENING_DURATION  // длительность открытия
+    }
     // Внутренние состояния системы
     // Набор состояний в которых может находиться установка
     
-    const uint32 work_STOP  = 0;
-    const uint32 work_WORK  = 1;
-    const uint32 work_ERROR = 2;
+    //const uint32 work_STOP  = 0;
+    //const uint32 work_WORK  = 1;
+    //const uint32 work_ERROR = 2;
 
     // Переменная для хранения состояния системы в данный момент (по умолчанию ОСТАНОВ)
-    uint32 current_work_state;
+    //uint32 current_work_state;
 
-    // Задание выходных\входных адресов для контроллера
-    // <вход\выход> <имя> <адрес1> <адрес2> <разрядность бит>;
-    output open_forward_thyristor   0x00 0xA0001 8; // Сигнал на открытие тиристора прямого тока
-    output open_reverse_thyristor   0x00 0xA0002 8; // Сигнал на открытие тиристора обратного тока
-    output open_C1_thyristor        0x00 0xA0003 8; // Сигнал на открытие тиристора ванны С1
-    output open_C2_thyristor        0x00 0xA0004 8; // Сигнал на открытие тиристора ванны С2
-
-
-    // Входные сигналы
-    input start_launch_thyristor        0x00 0xB0001 8; // Сигнал для пускового тиристора
-    input start_support_thyristor_C1    0x00 0xB0002 8; // Сигнал для тиристора ванны С1
-    input start_support_thyristor_C2    0x00 0xB0003 8; // Сигнал для тиристора ванны С2
-	input work_stop_signal              0x00 0xB0004 8; // Сигнал для завершения работы  
-    // Входняе данные по температуре тиристоров?
-
-    // Процесс проверки состояния установки и входных сигналов
-    process update{
-        
-        // Вход выход
-        //bool stop_work      = work_stop_signal[1] shared;
-        //bool signal_to_reverse_thyr = open_reverse_thyristor[1] shared;   
-
-        state start_work_process looped{
-            
-            // Запуск рабочих процессов
-            start process main_power_contorl;
-            start process bath_control_C1;
-            start process bath_control_C2;
-            
-        }
-    }
+    // выходной порт <вход\выход> <имя> <адрес1> <адрес2> <разрядность бит>;
+    output oportD   0x00 0x2 8; // выходной порт
     
-    // Включение пускового тиристора
-    process main_power_contorl{
+    // Входной порт
+    input iportB    0x00 0x1 8; // входной порт
 
-        // Вход выход
-        bool launch_power           = start_launch_thyristor[1];
-        bool signal_to_forward_thyr = open_forward_thyristor[1];
-        
-        state check_state{
-            // Если сигнал подачи пускового напряжения присутствует
-            if(launch_power){
-                current_work_state = work_WORK; // Обновим состояние системы
-                set state start_work_process;
-            }
-            else{
-                current_work_state = work_STOP;
-                set state stop_work_process;
-            }
+    // Функции
+
+    int8 getCMD(void);
+    int16 getInt16Param(void);
+    float getFloatParam(void);
+    time  getTimeParam(void);
+
+    int8 sendMsgIntParam(int32, int32);
+    int8 sendMsgFloatParam(int32, float);
+    int16 GetAnalog(int8);
+
+    // Глобальные переменные
+    bool RE = iportB[3]; // VCC rising edge
+    bool FE = iportB[4]; // VCC falling edge
+
+    bool Tr1 = oportD[1]; // Thyristor 1
+    bool Tr2 = oportD[2]; // Thyristor 2
+
+    float Tr1Temp; // температура тиристора 1
+    float Tr2Temp; // температура тиристора 2
+    time tOpeningDuration;
+
+    int8 CMD; // команда
+
+    process Init {
+        state begin {
+            Tr1 = OFF;
+            Tr2 = OFF;
+            tOpeningDuration = 0t100ms; 
+            start process GetCMD;
+            stop;
         }
-
-        // Подача сигнала на управляющий вывод тиристора
-        state start_work_process{  
-            // TODO добавить режим переключения тиристоров (?)
-            signal_to_forward_thyr = true;  // Включение пускового тиристора
-            set state check_state;          // Возвращаемся для отследжвания сигнала управления
-        }
-
-        state stop_work_process{
-            signal_to_forward_thyr = false; // Отключение питания управляющего контакта тиристора
-            set state check_state;          // Возвращаемся для отследжвания сигнала управления
+    }
+    process GetCMD {
+        state GetCommand looped {
+            // Запуск рабочих процессов
+            CMD = getCMD(); // возвращает !0 если есть команда
+            switch (CMD) {
+                case SEND_TR1_T: {
+                    start process SendTr1;
+                break;                
+                }
+                case SEND_TR2_T: {
+//                    start process SendTr2;
+                break;          
+                }      
+                case SEND_TR3_T: {
+//                    start process SendTr3;
+                break;                
+                }
+                case SEND_TR4_T: {
+//                    start process SendTr4;
+                break;          
+                }      
+// === команды
+                case START_OPENING: {
+                    start process Opening;
+                break;          
+                }      
+                
+// === технологические параметры (ТП) 
+                case TP_OPENING_DURATION: { // длительность открытия
+                    tOpeningDuration = getTimeParam();
+                break;          
+                }      
+            }
         }
     }
 
-    // Включение тиристора для ванны С1
-    process bath_control_C1{
-
-        // Вход выход
-        bool launch_C1  = start_support_thyristor_C1[1];
-        bool open_C1    = open_C1_thyristor[1];   
-
-        // Проверяем сигнал на входе
-        state check_state{
-            if (launch_C1){
-                set state start_C1_work;
-            }
-            else{
-                set state stop_C1_work;
-            }
-        }
-        
-        // Подаем сигнал на управляющий контакт тиристра ванны С1
-        state start_C1_work looped{
-
-            open_C1 = true;
-            set state check_state; // Возвращаемся в состояния отслеживания сигналов
-            
-        }
-        
-        // Убирам сигнал с управляющего контакта тиристра ванны С1
-        state stop_C1_work looped{
-
-            open_C1 = false;
-            set state check_state;
-            
+    process SendTr1 {
+        state begin {
+            Tr1Temp = GetAnalog(A0);
+            sendMsgFloatParam(SEND_TR1_T, Tr1Temp);
+            stop;    
         }
     }
 
-    // Включение тиристора для ванны С2
-    process bath_control_C2{
-
-        // Вход выход
-        bool launch_C2  = start_support_thyristor_C2[1];
-        bool open_C2    = open_C2_thyristor[1];   
-
-        // Проверяем сигнал на входе
-        state check_state{
-            if (launch_C2){
-                set state start_C2_work;
-            }
-            else{
-                set state stop_C2_work;
+    process Opening {
+        time tCurTime;
+        time tCurDelay shared; // !!! нужны микросекунды
+        state begin {
+            tCurTime = 0t0s;
+            tCurDelay = 0t10ms;
+            start process Tr12Control;
+            set next state;    
+        }
+        state culcCurDelay {
+            tCurTime += 0t100ms; // !! see clock
+            if (tCurTime >= tOpeningDuration) {
+                tCurDelay = 0t0ms;
+                stop;
+            } else {
+                tCurDelay = 0t10ms * (tOpeningDuration - tCurTime) / tOpeningDuration;
+            }                
+        }
+    }
+    process Tr12Control {
+        shared tCurDelay from process Opening;
+        state CheckRE {
+            if (RE) {
+                Tr1 = OFF;
+                Tr2 = OFF;
+                set next state;
+            }    
+        }
+        state PauseRE {
+            timeout (tCurDelay) {
+                Tr1 = ON;
+                set next state;
             }
         }
-        
-        // Подаем сигнал на управляющий контакт тиристра ванны С2
-        state start_C2_work looped{
-
-            open_C2 = true;
-            set state check_state; // Возвращаемся в состояния отслеживания сигналов
-            
+        state CheckFE {
+            if (FE) {
+                Tr1 = OFF;
+                Tr2 = OFF;
+                set next state;
+            }    
         }
-        
-        // Убирам сигнал с управляющего контакта тиристра ванны С2
-        state stop_C2_work looped{
-
-            open_C2 = false;
-            set state check_state;
-            
+        state PausefE looped{
+            timeout (tCurDelay) {
+                Tr2 = ON;
+                restart;
+            }
         }
     }
 }
